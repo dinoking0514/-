@@ -63,6 +63,25 @@ window.PlaceGuide=(()=>{
       <strong class="tile-name">${esc(p.name)}</strong>
       <span class="tile-sub">${esc(p.type)}${country?` · ${esc(country)}`:''}</span></a>`;
   }
+  /* 대륙의 국가·세력: 세계관 기준 설정의 방위별 세력 + 세계관 주요 설정(티플럼시아).
+     방위별·국가별 보기에서 2칸(30편 이상은 2×2) 타일로 크게 보여 준다. */
+  const MAJOR_EXTRA=['L-tiflum'];
+  let majorIds=null;
+  const isMajor=p=>{if(!majorIds)majorIds=new Set([...(window.RP_PLACES?.worldGeography?.regions||[]).flatMap(r=>r.places),...MAJOR_EXTRA]);return majorIds.has(p.id);};
+  const memberCount=p=>{const c=p.geography.country;return c.includes('미확인')?0:window.RP_PLACES.places.filter(q=>q.id!==p.id&&q.geography.country===c).length;};
+  function majorTile(p){
+    const n=storyCount(p),st=starsOf(n),k=kindOf(p.type),m=memberCount(p),big=n>=30;
+    const country=p.geography.country.includes('미확인')||p.name.startsWith(p.geography.country.split(' ')[0])?'':p.geography.country;
+    return `<a class="atlas-tile is-major ${big?'is-major-big':'is-major-wide'}" href="${placeLink(p.id)}" style="${dirStyle(p)}" title="${esc(p.description)}">
+      <span class="tile-dir">${esc(dirLabel(p.geography.direction))}</span>
+      <span class="tile-kind" title="${esc(p.type)}">${icon(k)}</span>
+      ${icon(k,'tile-emblem')}
+      <span class="major-body"><strong class="tile-name">${esc(p.name)}</strong>
+      <span class="tile-sub">${esc(p.type)}${country?` · ${esc(country)}`:''}</span>
+      <span class="major-meta">${n?`<span class="tile-stars" aria-label="${number(n)}개 이야기">${'★'.repeat(st)}<span>${'★'.repeat(3-st)}</span></span> ${number(n)}편`:'세계관 기준 설정'}${m?` · 소속 지명 ${number(m)}곳`:''}</span>
+      ${big?`<span class="major-desc">${esc(p.description)}</span>`:''}</span></a>`;
+  }
+  const featuredTile=p=>isMajor(p)?majorTile(p):placeTile(p);
   function renderPlaces(){
     const data=window.RP_PLACES;if(!data){$('results').innerHTML='<p>지명 자료를 불러오지 못했습니다.</p>';return;}
     const world=data.worldGeography,regionByKey={};
@@ -81,7 +100,7 @@ window.PlaceGuide=(()=>{
     const DIR_ORDER=['중부','북부','동북부','동부','중동부','남부','남서부','서부'];
     const dirRank=d=>{const i=DIR_ORDER.indexOf(d);return i<0?99:i;};
     const byWeight=(a,b)=>storyCount(b)-storyCount(a)||a.name.localeCompare(b.name,'ko');
-    const section=(title,sub,list,style='')=>`<section class="atlas-group" style="${style}"><h2 class="atlas-group-head"><span class="group-mark" aria-hidden="true"></span>${esc(title)}<small>${esc(sub)}</small><span class="group-count">${number(list.length)}</span></h2><div class="atlas-grid">${list.map(placeTile).join('')}</div></section>`;
+    const section=(title,sub,list,style='')=>`<section class="atlas-group" style="${style}"><h2 class="atlas-group-head"><span class="group-mark" aria-hidden="true"></span>${esc(title)}<small>${esc(sub)}</small><span class="group-count">${number(list.length)}</span></h2><div class="atlas-grid">${list.map(featuredTile).join('')}</div></section>`;
     const render=()=>{
       const q=$('search').value;
       const found=data.places.filter(p=>(!state.dir||dirParts(p.geography.direction).includes(state.dir))&&(!state.kind||kindOf(p.type)===state.kind)&&queryMatches(norm([p.name,p.type,p.region,p.description,...p.aliases,...Object.values(p.geography)].join(' ')),q));
@@ -97,7 +116,7 @@ window.PlaceGuide=(()=>{
         const groups=new Map();for(const p of found){const k=key(p);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(p);}
         const unknownLast=k=>k.includes('미확인')?1:0;
         const keys=[...groups.keys()].sort(state.view==='dir'?(a,b)=>dirRank(a)-dirRank(b):(a,b)=>unknownLast(a)-unknownLast(b)||groups.get(b).length-groups.get(a).length||a.localeCompare(b,'ko'));
-        html=keys.map(k=>{const list=groups.get(k).sort(byWeight);
+        html=keys.map(k=>{const list=groups.get(k).sort((a,b)=>isMajor(b)-isMajor(a)||byWeight(a,b));
           if(state.view==='dir'){const parts=dirParts(k);const reg=parts.length===1?regionByKey[parts[0]]:null;
             return section(k.includes('미확인')?'대륙 방위 미확인':k,reg?`${reg.terrain} · ${reg.politics}`:parts.length>1?`${parts.map(x=>DIRS[x].name).join('과 ')} 사이`:'원문에서 대륙 방위를 확인하지 못한 곳',list,`--c1:${DIRS[parts[0]].color};--c2:${DIRS[parts[1]||parts[0]].color}`);}
           return section(k,k.includes('미확인')?'소속을 확인하지 못한 곳':'',list,'--c1:var(--accent);--c2:var(--accent)');}).join('');
