@@ -1,21 +1,46 @@
 (() => {
   'use strict';
-  const entries=window.RP_ILLUSTRATIONS?.entries||[];
+  const data=window.RP_ILLUSTRATIONS||{},entries=data.entries||[];
+  const defaultStyle=data.defaultStyle||'style-001';
+  const styles=data.styles?.length?data.styles:[{id:defaultStyle,name:'현대 판타지풍',number:1}];
+  const styleMap=new Map(styles.map(style=>[style.id,style]));
+  const params=new URLSearchParams(location.search),preferenceKey='rp.illustrationStyle.v1';
+  let savedStyle='';try{savedStyle=localStorage.getItem(preferenceKey)||'';}catch{}
+  let preferredStyle=styleMap.has(params.get('style'))?params.get('style'):styleMap.has(savedStyle)?savedStyle:defaultStyle;
   const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const anchor=entry=>'illustration-'+entry.id;
-  const sceneLink=entry=>`read.html?id=${encodeURIComponent(entry.session)}#${anchor(entry)}`;
-  const imageHTML=(entry,{sizes='(max-width: 650px) 100vw, 720px',eager=false}={})=>`<img src="${esc(entry.image)}" srcset="${esc(entry.thumbnail)} 768w, ${esc(entry.image)} 1536w" sizes="${sizes}" width="${entry.width}" height="${entry.height}" alt="${esc(entry.alt)}" loading="${eager?'eager':'lazy'}" decoding="async"${eager?' fetchpriority="high"':''}>`;
+  const styleName=id=>styleMap.get(id)?.name||styleMap.get(defaultStyle)?.name||'현대 판타지풍';
+  const availableStyles=entry=>[defaultStyle,...styles.filter(style=>style.id!==defaultStyle&&entry.variants?.some(variant=>variant.style===style.id)).map(style=>style.id)];
+  const resolveImage=(entry,requested=preferredStyle)=>{
+    const wanted=styleMap.has(requested)?requested:defaultStyle;
+    const variant=wanted===defaultStyle?null:entry.variants?.find(item=>item.style===wanted);
+    return {image:variant?.image||entry.image,thumbnail:variant?.thumbnail||entry.thumbnail,
+      width:variant?.width||entry.width,height:variant?.height||entry.height,
+      thumbnailWidth:variant?.thumbnailWidth||Math.min(768,entry.width),
+      alt:variant?(variant.alt||`${entry.alt} — ${styleName(wanted)}`):entry.alt,
+      style:variant?wanted:defaultStyle,requestedStyle:wanted,fallback:wanted!==defaultStyle&&!variant};
+  };
+  const sceneLink=(entry,style=preferredStyle,character='')=>`read.html?id=${encodeURIComponent(entry.session)}${character?'&character='+encodeURIComponent(character):''}${style!==defaultStyle||preferredStyle!==defaultStyle||params.has('style')?'&style='+encodeURIComponent(style):''}#${anchor(entry)}`;
+  const imageHTML=(entry,{style=preferredStyle,sizes='(max-width: 650px) 100vw, 720px',eager=false}={})=>{
+    const asset=resolveImage(entry,style);
+    return `<img src="${esc(asset.image)}" srcset="${esc(asset.thumbnail)} ${asset.thumbnailWidth}w, ${esc(asset.image)} ${asset.width}w" sizes="${sizes}" width="${asset.width}" height="${asset.height}" alt="${esc(asset.alt)}" data-art-style="${esc(asset.style)}" loading="${eager?'eager':'lazy'}" decoding="async"${eager?' fetchpriority="high"':''}>`;
+  };
+  const styleNote=asset=>`<p class="illustration-style-note${asset.fallback?' is-fallback':''}">${esc(styleName(asset.style))}${asset.fallback?' · 선택한 화풍 버전이 없어 기본 그림으로 표시합니다.':''}</p>`;
   const bySession=new Map();
   for(const entry of entries){if(!bySession.has(entry.session))bySession.set(entry.session,[]);bySession.get(entry.session).push(entry);}
   window.Illustrations={
+    resolveImage,availableStyles,
     storyPreviewHTML(session,character=''){
       const own=bySession.get(session)||[];
       if(!own.length)return '';
-      return `<div class="story-illustrations">${own.map(entry=>`<figure><a href="read.html?id=${encodeURIComponent(session)}${character?'&character='+encodeURIComponent(character):''}#${anchor(entry)}" aria-label="${esc(entry.title)} — 이 장면 읽기">${imageHTML(entry,{sizes:'(max-width: 650px) 100vw, 420px'})}<figcaption>${esc(entry.title)} <span aria-hidden="true">→</span></figcaption></a></figure>`).join('')}</div>`;
+      return `<div class="story-illustrations">${own.map(entry=>`<figure><a href="${sceneLink(entry,preferredStyle,character)}" aria-label="${esc(entry.title)} — 이 장면 읽기">${imageHTML(entry,{sizes:'(max-width: 650px) 100vw, 420px'})}<figcaption>${esc(entry.title)} <span aria-hidden="true">→</span></figcaption></a></figure>`).join('')}</div>`;
     },
     anchorMessage(session,hash){return bySession.get(session)?.find(entry=>anchor(entry)===hash)?.after;},
     afterMessageHTML(session,message){
-      return (bySession.get(session)||[]).filter(entry=>entry.after===message).map(entry=>`<figure id="${anchor(entry)}" class="scene-illustration" tabindex="-1"><a class="illustration-image" href="${esc(entry.image)}" target="_blank" rel="noopener" aria-label="${esc(entry.title)} — 그림 크게 보기 (새 탭)">${imageHTML(entry)}</a><figcaption><span class="eyebrow">ILLUSTRATED MOMENT</span><h3>${esc(entry.title)}</h3><p>${esc(entry.caption)}</p><div class="illustration-actions"><a href="#${esc(entry.after)}">이 장면의 대화 ↑</a><a href="${esc(entry.image)}" target="_blank" rel="noopener">그림 크게 보기 ↗</a><a href="illustrations.html#${anchor(entry)}">일러스트집으로 →</a></div></figcaption></figure>`).join('');
+      return (bySession.get(session)||[]).filter(entry=>entry.after===message).map(entry=>{
+        const asset=resolveImage(entry);
+        return `<figure id="${anchor(entry)}" class="scene-illustration" tabindex="-1"><a class="illustration-image" href="${esc(asset.image)}" target="_blank" rel="noopener" aria-label="${esc(entry.title)} — 그림 크게 보기 (새 탭)">${imageHTML(entry)}</a><figcaption><span class="eyebrow">ILLUSTRATED MOMENT</span><h3>${esc(entry.title)}</h3><p>${esc(entry.caption)}</p>${styleNote(asset)}<div class="illustration-actions"><a href="#${esc(entry.after)}">이 장면의 대화 ↑</a><a href="${esc(asset.image)}" target="_blank" rel="noopener">그림 크게 보기 ↗</a><a href="illustrations.html${preferredStyle!==defaultStyle||params.has('style')?'?style='+encodeURIComponent(preferredStyle):''}#${anchor(entry)}">일러스트집으로 →</a></div></figcaption></figure>`;
+      }).join('');
     },
     renderContents(session){
       const box=document.getElementById('illustrationsBox');if(!box)return;
@@ -24,22 +49,49 @@
     }
   };
   if(document.body.dataset.page!=='illustrations')return;
-  const $=id=>document.getElementById(id),params=new URLSearchParams(location.search);
+  const $=id=>document.getElementById(id);
   $('artSearch').value=params.get('q')||'';
   $('artKind').value=['prepared','free'].includes(params.get('kind'))?params.get('kind'):'';
   $('artSort').value=['oldest','newest','random'].includes(params.get('sort'))?params.get('sort'):'random';
+  $('artStyle').innerHTML=styles.map(style=>`<option value="${esc(style.id)}">${esc(style.name)}</option>`).join('');
+  $('artStyle').value=preferredStyle;
+  $('artVariantsOnly').checked=params.get('variants')==='1';
+  const overrides=new Map();
   const shuffled=[...entries];
   for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
   const randomRank=new Map(shuffled.map((entry,index)=>[entry.id,index]));
   const norm=text=>String(text).normalize('NFKC').toLocaleLowerCase('ko').trim();
+  const cardBody=(entry,index)=>{
+    const requested=overrides.get(entry.id)||preferredStyle,asset=resolveImage(entry,requested),available=availableStyles(entry);
+    const link=sceneLink(entry,requested);
+    const controls=available.length>1?`<label class="illustration-style-choice" for="art-style-${entry.id}">이 그림의 화풍<select id="art-style-${entry.id}" data-illustration-style="${entry.id}">${available.map(id=>`<option value="${esc(id)}"${asset.style===id?' selected':''}>${esc(styleName(id))}</option>`).join('')}</select></label>`:'';
+    return `<a class="illustration-image" href="${link}" aria-label="${esc(entry.title)} — 이 장면 읽기">${imageHTML(entry,{style:requested,sizes:index===0?'(max-width: 760px) 100vw, 700px':'(max-width: 650px) 100vw, 540px',eager:index===0})}</a><div class="illustration-caption"><p class="eyebrow"><time datetime="${entry.start.slice(0,10)}">${entry.start.slice(0,10).replaceAll('-','.')}</time> · ${esc(entry.storyLabel)}</p><h2><a href="${link}">${esc(entry.title)}</a></h2><p>${esc(entry.caption)}</p><p class="illustration-people">${entry.characters.map(esc).join(' · ')}</p><p class="illustration-source">${esc(entry.sessionTitle)}</p><div class="illustration-style-controls">${controls}${styleNote(asset)}</div><div class="illustration-actions"><a class="illustration-read" href="${link}">이 장면 읽기 →</a><a href="${esc(asset.image)}" target="_blank" rel="noopener" aria-label="${esc(entry.title)} — 그림 크게 보기 (새 탭)">크게 보기 ↗</a></div></div>`;
+  };
   const render=()=>{
     const query=norm($('artSearch').value).split(/\s+/).filter(Boolean),kind=$('artKind').value,sort=$('artSort').value;
-    const selected=entries.filter(entry=>(!kind||entry.story===kind)&&query.every(word=>norm([entry.title,entry.caption,entry.sessionTitle,...entry.characters].join(' ')).includes(word))).sort((a,b)=>sort==='random'?randomRank.get(a.id)-randomRank.get(b.id):(sort==='oldest'?1:-1)*(a.start.localeCompare(b.start)||a.id.localeCompare(b.id)));
+    const selected=entries.filter(entry=>(!$('artVariantsOnly').checked||availableStyles(entry).length>1)&&(!kind||entry.story===kind)&&query.every(word=>norm([entry.title,entry.caption,entry.sessionTitle,...entry.characters].join(' ')).includes(word))).sort((a,b)=>sort==='random'?randomRank.get(a.id)-randomRank.get(b.id):(sort==='oldest'?1:-1)*(a.start.localeCompare(b.start)||a.id.localeCompare(b.id)));
     $('artCount').textContent=`${selected.length}장의 삽화 · ${sort==='random'?'랜덤 순':sort==='oldest'?'오래된 세션 순':'최근 세션 순'}`;
-    $('illustrationGallery').innerHTML=selected.map((entry,index)=>`<article id="${anchor(entry)}" class="illustration-card${index===0?' illustration-featured':''}"><a class="illustration-image" href="${sceneLink(entry)}" aria-label="${esc(entry.title)} — 이 장면 읽기">${imageHTML(entry,{sizes:index===0?'(max-width: 760px) 100vw, 700px':'(max-width: 650px) 100vw, 540px',eager:index===0})}</a><div class="illustration-caption"><p class="eyebrow"><time datetime="${entry.start.slice(0,10)}">${entry.start.slice(0,10).replaceAll('-','.')}</time> · ${esc(entry.storyLabel)}</p><h2><a href="${sceneLink(entry)}">${esc(entry.title)}</a></h2><p>${esc(entry.caption)}</p><p class="illustration-people">${entry.characters.map(esc).join(' · ')}</p><p class="illustration-source">${esc(entry.sessionTitle)}</p><div class="illustration-actions"><a class="illustration-read" href="${sceneLink(entry)}">이 장면 읽기 →</a><a href="${esc(entry.image)}" target="_blank" rel="noopener" aria-label="${esc(entry.title)} — 그림 크게 보기 (새 탭)">크게 보기 ↗</a></div></div></article>`).join('')||'<p class="empty">조건에 맞는 삽화가 없습니다.</p>';
-    try{const url=new URL(location.href);for(const [key,value]of [['q',$('artSearch').value],['kind',kind],['sort',sort==='random'?'':sort]]){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}history.replaceState(null,'',url);}catch{}
+    const matching=selected.filter(entry=>resolveImage(entry).style===preferredStyle).length;
+    $('artStyleSummary').textContent=preferredStyle===defaultStyle?'그림별 화풍 메뉴에서 다른 버전도 골라볼 수 있습니다.':`${styleName(preferredStyle)} 버전이 있는 그림 ${matching}장 · 나머지 ${selected.length-matching}장은 현대 판타지풍으로 시작합니다.`;
+    $('illustrationGallery').innerHTML=selected.map((entry,index)=>`<article id="${anchor(entry)}" data-illustration="${entry.id}" class="illustration-card${index===0?' illustration-featured':''}">${cardBody(entry,index)}</article>`).join('')||'<p class="empty">조건에 맞는 삽화가 없습니다.</p>';
+    try{const url=new URL(location.href);for(const [key,value]of [['q',$('artSearch').value],['kind',kind],['sort',sort==='random'?'':sort],['style',preferredStyle!==defaultStyle||params.has('style')?preferredStyle:''],['variants',$('artVariantsOnly').checked?'1':'']]){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}history.replaceState(null,'',url);}catch{}
   };
   for(const id of ['artSearch','artKind','artSort'])$(id).addEventListener('input',render);
+  $('artVariantsOnly').addEventListener('input',render);
+  $('artStyle').addEventListener('input',()=>{
+    preferredStyle=styleMap.has($('artStyle').value)?$('artStyle').value:defaultStyle;
+    overrides.clear();
+    try{localStorage.setItem(preferenceKey,preferredStyle);}catch{}
+    render();
+  });
+  $('illustrationGallery').addEventListener('change',event=>{
+    const id=event.target.dataset.illustrationStyle;if(!id)return;
+    const entry=entries.find(item=>item.id===id);if(!entry||!availableStyles(entry).includes(event.target.value))return;
+    overrides.set(id,event.target.value);
+    const card=document.getElementById(anchor(entry));
+    card.innerHTML=cardBody(entry,card.classList.contains('illustration-featured')?0:1);
+    document.getElementById('art-style-'+id)?.focus({preventScroll:true});
+  });
   render();
   const jump=()=>{let hash='';try{hash=decodeURIComponent(location.hash.slice(1));}catch{}if(hash)document.getElementById(hash)?.scrollIntoView({block:'start'});};
   window.addEventListener('hashchange',jump);jump();
