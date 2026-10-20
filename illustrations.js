@@ -79,13 +79,47 @@
     const controls=available.length>1?`<label class="illustration-style-choice" for="art-style-${entry.id}">이 그림의 화풍<select id="art-style-${entry.id}" data-illustration-style="${entry.id}">${available.map(id=>`<option value="${esc(id)}"${asset.style===id?' selected':''}>${esc(styleName(id))}</option>`).join('')}</select></label>`:'';
     return `<a class="illustration-image" href="${link}" aria-label="${esc(entry.title)} — 이 장면 읽기">${imageHTML(entry,{style:requested,sizes:index===0?'(max-width: 760px) 100vw, 700px':'(max-width: 650px) 100vw, 540px',eager:index===0})}</a><div class="illustration-caption"><p class="eyebrow"><time datetime="${entry.start.slice(0,10)}">${entry.start.slice(0,10).replaceAll('-','.')}</time> · ${esc(entry.storyLabel)}</p><h2><a href="${link}">${esc(entry.title)}</a></h2><p>${esc(entry.caption)}</p><p class="illustration-people">${entry.characters.map(esc).join(' · ')}</p><p class="illustration-source">${esc(entry.sessionTitle)}</p><div class="illustration-style-controls">${controls}${styleNote(asset)}</div><div class="illustration-actions"><a class="illustration-read" href="${link}">이 장면 읽기 →</a><a href="${esc(asset.image)}" target="_blank" rel="noopener" aria-label="${esc(entry.title)} — 그림 크게 보기 (새 탭)">크게 보기 ↗</a></div></div>`;
   };
+  const batchSize=24;
+  let selected=[],rendered=0,observer;
+  const gallery=$('illustrationGallery'),sentinel=$('artScrollSentinel');
+  const updateLoader=()=>{
+    const more=rendered<selected.length;
+    $('artLoadMore').hidden=!more;
+    $('artLoadStatus').textContent=selected.length?`${selected.length}장 중 ${rendered}장 표시${more?' · 아래로 내리면 이어집니다.':' · 모든 삽화를 표시했습니다.'}`:'';
+    observer?.disconnect();
+    if(more)observer?.observe(sentinel);
+  };
+  const appendBatch=(through=rendered+batchSize)=>{
+    const end=Math.min(selected.length,Math.max(rendered,through));
+    const html=selected.slice(rendered,end).map((entry,offset)=>{
+      const index=rendered+offset;
+      return `<article id="${anchor(entry)}" data-illustration="${entry.id}" class="illustration-card${index===0?' illustration-featured':''}">${cardBody(entry,index)}</article>`;
+    }).join('');
+    gallery.insertAdjacentHTML('beforeend',html);
+    rendered=end;
+    updateLoader();
+  };
+  const jump=()=>{
+    let hash='';try{hash=decodeURIComponent(location.hash.slice(1));}catch{}
+    const index=selected.findIndex(entry=>anchor(entry)===hash);
+    if(index<0)return;
+    if(index>=rendered)appendBatch(Math.ceil((index+1)/batchSize)*batchSize);
+    document.getElementById(hash)?.scrollIntoView({block:'start'});
+  };
+  if('IntersectionObserver' in window)observer=new IntersectionObserver(items=>{
+    if(items.some(item=>item.isIntersecting)&&rendered<selected.length)appendBatch();
+  },{rootMargin:'800px 0px'});
+  $('artLoadMore').addEventListener('click',()=>appendBatch());
   const render=()=>{
     const query=norm($('artSearch').value).split(/\s+/).filter(Boolean),kind=$('artKind').value,sort=$('artSort').value;
-    const selected=entries.filter(entry=>(!$('artVariantsOnly').checked||baseStyle(entry)!==defaultStyle||availableStyles(entry).length>1)&&(!kind||entry.story===kind)&&query.every(word=>norm([entry.title,entry.caption,entry.sessionTitle,...entry.characters].join(' ')).includes(word))).sort((a,b)=>sort==='random'?randomRank.get(a.id)-randomRank.get(b.id):(sort==='oldest'?1:-1)*(a.start.localeCompare(b.start)||a.id.localeCompare(b.id)));
+    selected=entries.filter(entry=>(!$('artVariantsOnly').checked||baseStyle(entry)!==defaultStyle||availableStyles(entry).length>1)&&(!kind||entry.story===kind)&&query.every(word=>norm([entry.title,entry.caption,entry.sessionTitle,...entry.characters].join(' ')).includes(word))).sort((a,b)=>sort==='random'?randomRank.get(a.id)-randomRank.get(b.id):(sort==='oldest'?1:-1)*(a.start.localeCompare(b.start)||a.id.localeCompare(b.id)));
     $('artCount').textContent=`${selected.length}장의 삽화 · ${sort==='random'?'랜덤 순':sort==='oldest'?'오래된 세션 순':'최근 세션 순'}`;
     const matching=selected.filter(entry=>resolveImage(entry,'other').style!==defaultStyle).length;
     $('artStyleSummary').textContent=preferredView==='fantasy'?'현대 판타지풍과 각 장면의 고유 작풍을 표시합니다.':`다른 화풍의 이미지 ${matching}장 · 나머지 ${selected.length-matching}장은 현대 판타지풍으로 표시합니다.`;
-    $('illustrationGallery').innerHTML=selected.map((entry,index)=>`<article id="${anchor(entry)}" data-illustration="${entry.id}" class="illustration-card${index===0?' illustration-featured':''}">${cardBody(entry,index)}</article>`).join('')||'<p class="empty">조건에 맞는 삽화가 없습니다.</p>';
+    observer?.disconnect();
+    rendered=0;
+    gallery.innerHTML=selected.length?'':'<p class="empty">조건에 맞는 삽화가 없습니다.</p>';
+    appendBatch(batchSize);
     try{const url=new URL(location.href);url.searchParams.delete('style');for(const [key,value]of [['q',$('artSearch').value],['kind',kind],['sort',sort==='random'?'':sort],['view',preferredView],['variants',$('artVariantsOnly').checked?'1':'']]){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);}history.replaceState(null,'',url);}catch{}
   };
   for(const id of ['artSearch','artKind','artSort'])$(id).addEventListener('input',render);
@@ -104,7 +138,7 @@
     card.innerHTML=cardBody(entry,card.classList.contains('illustration-featured')?0:1);
     document.getElementById('art-style-'+id)?.focus({preventScroll:true});
   });
+  if(sharedStyle&&sharedEntry)overrides.set(sharedEntry,sharedStyle);
   render();
-  const jump=()=>{let hash='';try{hash=decodeURIComponent(location.hash.slice(1));}catch{}if(hash)document.getElementById(hash)?.scrollIntoView({block:'start'});};
   window.addEventListener('hashchange',jump);jump();
 })();
