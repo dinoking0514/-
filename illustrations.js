@@ -28,7 +28,7 @@
     const variant=wanted==='other'?(entry.variants?.find(item=>item.representative)||entry.variants?.[0]):wanted===originalStyle?null:entry.variants?.find(item=>item.style===wanted);
     return {image:variant?.image||entry.image,thumbnail:variant?.thumbnail||entry.thumbnail,
       width:variant?.width||entry.width,height:variant?.height||entry.height,
-      thumbnailWidth:variant?.thumbnailWidth||Math.min(768,entry.width),
+      thumbnailWidth:variant?.thumbnailWidth||entry.thumbnailWidth||Math.min(768,entry.width),
       alt:variant?(variant.alt||`${entry.alt} — ${styleName(variant.style)}`):entry.alt,
       style:variant?variant.style:originalStyle,requestedStyle:wanted,
       fallback:requested!=='fantasy'&&wanted!=='other'&&wanted!==originalStyle&&!variant||wanted==='other'&&originalStyle===defaultStyle&&!variant};
